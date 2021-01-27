@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/id"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -32,6 +33,7 @@ type ErrorAndCode struct {
 }
 
 func main() {
+	var mutex = &sync.Mutex{}
 	var errSlice []ErrorAndCode
 	flag.Parse()
 
@@ -84,17 +86,20 @@ func main() {
 
 	signal := make(chan bool, 1)
 	errChan := make(chan bool, 1)
-	monErrChan := make(chan ErrorAndCode)
 
 	syncer := client2.Syncer.(*mautrix.DefaultSyncer)
 	syncer.OnEventType(event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		//fmt.Printf("%[5]s <%[1]s> %[4]s (%[2]s/%[3]s)\n", evt.Sender, evt.Type.String(), evt.ID, evt.Content.AsMessage().Body, evt.Timestamp)
 		err := client2.MarkRead(id.RoomID(*roomID), evt.ID)
 		if err != nil {
-			monErrChan <- ErrorAndCode{3, errors.New("Could not mark message as read")}
+			mutex.Lock()
+			errSlice = append(errSlice, ErrorAndCode{3, errors.New("Could not mark message as read")})
+			mutex.Unlock()
 		}
 		if evt.Content.AsMessage().Body == sendingText {
-			monErrChan <- ErrorAndCode{0, errors.New("The chain check was successfull")}
+			mutex.Lock()
+			errSlice = append(errSlice, ErrorAndCode{0, errors.New("The chain check was successfull")})
+			mutex.Unlock()
 			signal <- true
 		}
 	})
@@ -102,7 +107,9 @@ func main() {
 	go func() {
 		err = client2.Sync()
 		if err != nil {
-			monErrChan <- ErrorAndCode{3, errors.New("sync stopped with error")}
+			mutex.Lock()
+			errSlice = append(errSlice, ErrorAndCode{3, errors.New("sync stopped with error")})
+			mutex.Unlock()
 		}
 	}()
 
@@ -114,13 +121,10 @@ func main() {
 	select {
 	case <-signal:
 		client2.StopSync()
+
 	case <-errChan:
 		client2.StopSync()
 		errSlice = append(errSlice, ErrorAndCode{2, errors.New("Message was not received")})
-	}
-	close(monErrChan)
-	for i := range monErrChan {
-		errSlice = append(errSlice, i)
 	}
 
 	OutputMonitoring(errSlice, "checked")
