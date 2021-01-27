@@ -44,7 +44,7 @@ func main() {
 	//fmt.Println("Logging into", *sendingHomeServer, "as", *sendingUsername)
 	client, err := mautrix.NewClient(*sendingHomeServer, "", "")
 	if err != nil {
-		errSlice = append(errSlice, ErrorAndCode{3, errors.New("Homeserver not known" + *sendingHomeServer)})
+		errSlice = append(errSlice, ErrorAndCode{3, errors.New("Homeserver not known " + *sendingHomeServer)})
 		OutputMonitoring(errSlice, "checked")
 	}
 	_, err = client.Login(&mautrix.ReqLogin{
@@ -78,22 +78,23 @@ func main() {
 		StoreCredentials: true,
 	})
 	if err != nil {
-		errSlice = append(errSlice, ErrorAndCode{3, errors.New("Could not login to" + *sendingHomeServer)})
+		errSlice = append(errSlice, ErrorAndCode{3, errors.New("Could not login to " + *sendingHomeServer)})
 		OutputMonitoring(errSlice, "checked")
 	}
 
 	signal := make(chan bool, 1)
 	errChan := make(chan bool, 1)
+	monErrChan := make(chan ErrorAndCode)
 
 	syncer := client2.Syncer.(*mautrix.DefaultSyncer)
 	syncer.OnEventType(event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		//fmt.Printf("%[5]s <%[1]s> %[4]s (%[2]s/%[3]s)\n", evt.Sender, evt.Type.String(), evt.ID, evt.Content.AsMessage().Body, evt.Timestamp)
 		err := client2.MarkRead(id.RoomID(*roomID), evt.ID)
 		if err != nil {
-			errSlice = append(errSlice, ErrorAndCode{3, errors.New("Could not mark message as read")})
+			monErrChan <- ErrorAndCode{3, errors.New("Could not mark message as read")}
 		}
 		if evt.Content.AsMessage().Body == sendingText {
-			errSlice = append(errSlice, ErrorAndCode{0, errors.New("The chain check was successfull")})
+			monErrChan <- ErrorAndCode{0, errors.New("The chain check was successfull")}
 			signal <- true
 		}
 	})
@@ -101,7 +102,7 @@ func main() {
 	go func() {
 		err = client2.Sync()
 		if err != nil {
-			errSlice = append(errSlice, ErrorAndCode{3, errors.New("sync stopped with error")})
+			monErrChan <- ErrorAndCode{3, errors.New("sync stopped with error")}
 		}
 	}()
 
@@ -116,6 +117,9 @@ func main() {
 	case <-errChan:
 		client2.StopSync()
 		errSlice = append(errSlice, ErrorAndCode{2, errors.New("Message was not received")})
+	}
+	for i := range monErrChan {
+		errSlice = append(errSlice, i)
 	}
 	OutputMonitoring(errSlice, "checked")
 }
