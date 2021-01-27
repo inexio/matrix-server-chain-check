@@ -118,9 +118,11 @@ func main() {
 		client2.StopSync()
 		errSlice = append(errSlice, ErrorAndCode{2, errors.New("Message was not received")})
 	}
+	close(monErrChan)
 	for i := range monErrChan {
 		errSlice = append(errSlice, i)
 	}
+
 	OutputMonitoring(errSlice, "checked")
 }
 
